@@ -23,7 +23,11 @@ jobs:
             -scheme V2rayU \
             -sdk macosx \
             -destination 'platform=macOS' \
-            -resultBundlePath test-results.xcresult
+            -resultBundlePath test-results.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS=""
 
       - name: Upload test results
         if: always()
