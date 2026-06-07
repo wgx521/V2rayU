@@ -2,13 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main, rm]
+    branches: [main]
   pull_request:
     branches: [main]
 
 jobs:
   build-and-test:
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -16,23 +16,18 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Build
-        run: |
-          xcodebuild -project V2rayU.xcodeproj \
-            -scheme V2rayUTests \
-            -sdk macosx \
-            -destination 'platform=macOS' \
-            build
-
-      - name: Test
+      - name: Build and Test
         run: |
           xcodebuild test \
             -project V2rayU.xcodeproj \
-            -scheme V2rayUTests \
+            -scheme V2rayU \
             -sdk macosx \
-            -destination 'platform=macOS'
+            -destination 'platform=macOS' \
+            -resultBundlePath test-results.xcresult
 
-      - name: Show test results
+      - name: Upload test results
         if: always()
-        run: |
-          find /Users/runner/Library/Developer/Xcode/DerivedData -name "*.xcresult" -type d | head -5
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.xcresult
