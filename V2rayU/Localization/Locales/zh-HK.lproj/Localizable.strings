@@ -760,3 +760,6 @@
 "PingSuccessFormat" = "Ping 成功: %@ - %dms";
 "PingFailureRetryFormat" = "Ping 失敗: %@ - 第%d次: %@";
 "PingCompleteSingleNodeFormat" = "完成單節點 Ping: %@";
+"ProxyDeadToast" = "當前代理節點無響應，正在切換備用節點...";
+"SubscriptionRefreshToast" = "所有節點已失效，正在自動更新訂閱...";
+"ProxyDeadSwitchHint" = "建議切換伺服器或刷新訂閱";

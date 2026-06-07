@@ -755,4 +755,9 @@ enum LanguageLabel: String, CaseIterable {
     case PingSuccessFormat
     case PingFailureRetryFormat
     case PingCompleteSingleNodeFormat
+
+    // MARK: - Proxy Health Notifications
+    case ProxyDeadToast
+    case SubscriptionRefreshToast
+    case ProxyDeadSwitchHint
 }

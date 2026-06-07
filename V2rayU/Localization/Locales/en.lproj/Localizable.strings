@@ -760,3 +760,6 @@ To enable Tun mode: Click the V2rayU icon in the menu bar -> Select Tun mode, or
 "PingSuccessFormat" = "Ping succeeded: %@ - %dms";
 "PingFailureRetryFormat" = "Ping failed: %@ - attempt %d: %@";
 "PingCompleteSingleNodeFormat" = "Completed single-node ping: %@";
+"ProxyDeadToast" = "Current proxy is not responding. Switching to a backup server...";
+"SubscriptionRefreshToast" = "All servers are down. Auto-refreshing subscription...";
+"ProxyDeadSwitchHint" = "Try switching servers or refreshing subscription";

@@ -386,6 +386,7 @@ actor PingRunning {
     private var failureCount = 0
     private var isExecuting = false
     private var item: ProfileEntity = ProfileEntity()
+    private var notifiedSubscriptions: Set<String> = []
 
     private func localized(_ label: LanguageLabel, _ arguments: CVarArg...) async -> String {
         let format = await MainActor.run { LanguageManager.shared.localizedString(label.rawValue) }
@@ -453,19 +454,22 @@ actor PingRunning {
 
     /// 处理失败逻辑
     private func handleFailure() async {
-        // 更新 ping 结果
         updateSpeed(pingTime: -1)
         failureCount += 1
         if failureCount >= maxFailures {
             failureCount = 0
             logger.info("Ping failed \(self.maxFailures) times, switching to backup...")
+            // 通知用户当前节点不可用
+            let toastMsg = await MainActor.run {
+                LanguageManager.shared.localizedString(LanguageLabel.ProxyDeadToast.rawValue)
+            }
+            makeToast(message: toastMsg, displayDuration: 5)
             await switchServer()
         }
     }
 
     /// 切换到备用服务器
     private func switchServer() async {
-        // 实现切换逻辑，比如更新 AppState.shared.pingURL 或其他参数
         await chooseNewServer(uuid: item.uuid)
     }
 
@@ -477,25 +481,16 @@ actor PingRunning {
 
         let serverList = ProfileStore.shared.fetchAll()
         guard serverList.count > 1 else {
+            await checkAndRefreshSubscription(for: item)
             return
         }
 
-        var pingedSvrs = [String: Int]()
-        var allSvrs = [String]()
-
-        for svr in serverList where svr.uuid != uuid {
-            allSvrs.append(svr.uuid)
-            if svr.speed != -1 {
-                pingedSvrs[svr.uuid] = svr.speed
-            }
-        }
-
-        let newSvrName: String
-        if let fastestSvr = pingedSvrs.sorted(by: { $0.value < $1.value }).first {
-            newSvrName = fastestSvr.key
-        } else if let randomSvr = allSvrs.randomElement() {
-            newSvrName = randomSvr
-        } else {
+        guard let newSvrName = Self.selectBestServer(
+            from: serverList,
+            currentUuid: uuid,
+            currentSubId: item.subid
+        ) else {
+            await checkAndRefreshSubscription(for: item)
             return
         }
 
@@ -505,6 +500,103 @@ actor PingRunning {
             await V2rayLaunch.shared.restart()
             await AppMenuManager.shared.refreshServerItems()
         }
+    }
+
+    /// 检查同一订阅的所有服务器是否全部失效，如果是则触发刷新
+    private func checkAndRefreshSubscription(for item: ProfileEntity) async {
+        let subId = item.subid
+        guard !subId.isEmpty,
+              let sub = SubscriptionStore.shared.fetchOne(uuid: subId),
+              sub.enable else { return }
+
+        // 防止重复刷新同一个订阅
+        guard !notifiedSubscriptions.contains(subId) else { return }
+        notifiedSubscriptions.insert(subId)
+
+        // 检查同订阅所有服务器是否都挂了
+        let sameSubProfiles = ProfileStore.shared.fetchAll().filter { $0.subid == subId }
+        let allDead = Self.isSubscriptionAllDead(profiles: sameSubProfiles, subId: subId)
+
+        if allDead {
+            logger.info("All servers in subscription \(sub.remark) are dead, triggering refresh")
+            let toastMsg = await MainActor.run {
+                LanguageManager.shared.localizedString(LanguageLabel.SubscriptionRefreshToast.rawValue)
+            }
+            makeToast(message: toastMsg, displayDuration: 5)
+            // 触发订阅刷新
+            await SubscriptionHandler.shared.syncOne(item: sub)
+            // 刷新完成后清除标记，允许后续再次触发
+            try? await Task.sleep(nanoseconds: 60_000_000_000) // 60s 冷却
+            notifiedSubscriptions.remove(subId)
+        } else {
+            notifiedSubscriptions.remove(subId)
+        }
+    }
+
+    // MARK: - Testable Static Methods
+
+    /// 从服务器列表中选择最佳备选节点（纯函数，便于测试）
+    /// - Returns: 选中的服务器 uuid，无可用备选时返回 nil
+    static func selectBestServer(
+        from profiles: [ProfileEntity],
+        currentUuid: String,
+        currentSubId: String
+    ) -> String? {
+        let (same, other) = groupBySubscription(
+            profiles: profiles,
+            currentUuid: currentUuid,
+            currentSubId: currentSubId
+        )
+
+        let candidates = same.isEmpty ? other : same
+        guard !candidates.isEmpty else { return nil }
+
+        // 已测速的选最快的
+        let pinged = candidates.filter { $0.speed > 0 }
+        if let fastest = pinged.min(by: { $0.speed < $1.speed }) {
+            return fastest.uuid
+        }
+
+        // 未测速的随机选
+        return candidates.randomElement()?.uuid
+    }
+
+    /// 按订阅分组服务器（纯函数，便于测试）
+    /// - Returns: (同订阅服务器, 其他订阅服务器)，均不含当前 uuid
+    static func groupBySubscription(
+        profiles: [ProfileEntity],
+        currentUuid: String,
+        currentSubId: String
+    ) -> (same: [ProfileEntity], other: [ProfileEntity]) {
+        var same: [ProfileEntity] = []
+        var other: [ProfileEntity] = []
+
+        for profile in profiles where profile.uuid != currentUuid {
+            if !currentSubId.isEmpty && profile.subid == currentSubId {
+                same.append(profile)
+            } else {
+                other.append(profile)
+            }
+        }
+
+        return (same, other)
+    }
+
+    /// 检查同一订阅的所有服务器是否全部失效（纯函数，便于测试）
+    /// - Parameters:
+    ///   - profiles: 该订阅下的所有服务器（调用方负责筛选）
+    ///   - subId: 订阅 ID
+    ///   - minServerCount: 最少服务器数量阈值，默认 3
+    static func isSubscriptionAllDead(
+        profiles: [ProfileEntity],
+        subId: String,
+        minServerCount: Int = 3
+    ) -> Bool {
+        guard !subId.isEmpty else { return false }
+        guard profiles.count >= minServerCount else { return false }
+        let sameSubProfiles = profiles.filter { $0.subid == subId }
+        guard sameSubProfiles.count >= minServerCount else { return false }
+        return sameSubProfiles.allSatisfy { $0.speed <= 0 }
     }
 }
 
