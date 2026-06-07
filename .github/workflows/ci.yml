@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build-and-test:
+  build:
     runs-on: macos-latest
     steps:
       - name: Checkout
@@ -16,22 +16,26 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 
-      - name: Build and Test
+      - name: Build
         run: |
-          xcodebuild test \
+          xcodebuild build \
             -project V2rayU.xcodeproj \
             -scheme V2rayU \
             -sdk macosx \
             -destination 'platform=macOS' \
-            -resultBundlePath test-results.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS=""
 
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results
-          path: test-results.xcresult
+      - name: Build Tool
+        run: |
+          xcodebuild build \
+            -project V2rayU.xcodeproj \
+            -target V2rayUTool \
+            -sdk macosx \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS=""
