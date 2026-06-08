@@ -125,8 +125,21 @@ actor SubscriptionHandler {
             return
         }
 
-        // url request with proxy
-        let session = URLSession(configuration: getProxyUrlSessionConfigure())
+        // 订阅刷新策略：代理存活时走代理，代理死了直连，避免死锁
+        let proxyAlive = await MainActor.run { AppState.shared.latency > 0 }
+        let useProxy = proxyAlive && isPortOpen(getEffectiveHttpProxyPort())
+        let config: URLSessionConfiguration
+        if useProxy {
+            config = getProxyUrlSessionConfigure()
+        } else {
+            logger.info("SubscriptionHandler: proxy appears dead, using direct connection")
+            config = URLSessionConfiguration.default
+            config.requestCachePolicy = .reloadIgnoringLocalCacheData
+            config.urlCache = nil
+            config.timeoutIntervalForRequest = 30
+        }
+
+        let session = URLSession(configuration: config)
         do {
             let (data, _) = try await session.data(for: URLRequest(url: reqUrl))
             if let outputStr = String(data: data, encoding: String.Encoding.utf8) {
@@ -135,8 +148,27 @@ actor SubscriptionHandler {
                 logTip(title: "loading fail: ", uri: url, informativeText: "data is nil")
             }
         } catch let error {
-            // failed to write file – bad permissions, bad filename, missing permissions, or more likely it can't be converted to the encoding
-            logger.info("save json file fail: \(error)")
+            // 如果走代理失败了，尝试直连重试一次
+            if useProxy {
+                logger.info("SubscriptionHandler: proxy fetch failed, retrying with direct connection: \(error)")
+                let directConfig = URLSessionConfiguration.default
+                directConfig.requestCachePolicy = .reloadIgnoringLocalCacheData
+                directConfig.urlCache = nil
+                directConfig.timeoutIntervalForRequest = 30
+                let directSession = URLSession(configuration: directConfig)
+                do {
+                    let (data, _) = try await directSession.data(for: URLRequest(url: reqUrl))
+                    if let outputStr = String(data: data, encoding: String.Encoding.utf8) {
+                        handle(base64Str: outputStr, sub: sub, url: url)
+                    } else {
+                        logTip(title: "loading fail: ", uri: url, informativeText: "data is nil")
+                    }
+                } catch {
+                    logger.info("SubscriptionHandler: direct fetch also failed: \(error)")
+                }
+            } else {
+                logger.info("save json file fail: \(error)")
+            }
         }
     }
 

@@ -8,6 +8,7 @@ import Combine
 import Foundation
 
 let NOTIFY_UPDATE_Ping = Notification.Name(rawValue: "NOTIFY_UPDATE_Ping")
+let NOTIFY_PROXY_DEAD = Notification.Name(rawValue: "NOTIFY_PROXY_DEAD")
 
 actor PingAll {
     static let shared = PingAll()
@@ -459,6 +460,8 @@ actor PingRunning {
         if failureCount >= maxFailures {
             failureCount = 0
             logger.info("Ping failed \(self.maxFailures) times, switching to backup...")
+            // 广播代理死亡事件，触发订阅刷新等恢复动作
+            NotificationCenter.default.post(name: NOTIFY_PROXY_DEAD, object: item.subid)
             // 通知用户当前节点不可用
             let toastMsg = await MainActor.run {
                 LanguageManager.shared.localizedString(LanguageLabel.ProxyDeadToast.rawValue)

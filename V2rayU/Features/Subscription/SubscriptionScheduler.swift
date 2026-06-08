@@ -12,7 +12,10 @@ actor SubscriptionScheduler {
 
     private var timers: [String: DispatchSourceTimer] = [:] // key: uuid
     private var cancellables: Set<AnyCancellable> = []
-    
+    private var deathObserver: NSObjectProtocol?
+    private var lastEmergencySync: Date = .distantPast
+    private let emergencySyncCooldown: TimeInterval = 120
+
     func runAtStart() {
         Task {
             if await AppSettings.shared.autoUpdateServers {
@@ -20,8 +23,36 @@ actor SubscriptionScheduler {
             }
             await SubscriptionScheduler.shared.refreshAll()
         }
+        startObserving()
     }
-    
+
+    /// 监听代理死亡事件，触发紧急订阅刷新
+    private func startObserving() {
+        deathObserver = NotificationCenter.default.addObserver(
+            forName: NOTIFY_PROXY_DEAD,
+            object: nil,
+            queue: .main
+        ) { _ in
+            Task {
+                await SubscriptionScheduler.shared.emergencySync()
+            }
+        }
+    }
+
+    /// 代理死亡时立即刷新所有订阅（有冷却时间）
+    func emergencySync() {
+        let now = Date()
+        guard now.timeIntervalSince(lastEmergencySync) >= emergencySyncCooldown else {
+            logger.info("SubscriptionScheduler: emergency sync skipped (cooldown)")
+            return
+        }
+        lastEmergencySync = now
+        logger.info("SubscriptionScheduler: emergency sync triggered by proxy dead event")
+        Task {
+            await SubscriptionHandler.shared.sync()
+        }
+    }
+
     // 全量刷新：根据 enable/interval 和全局开关做增删改
     func refreshAll() {
         Task {
